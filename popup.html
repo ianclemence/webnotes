@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Sticky Notes</title>
+    <style>
+      body {
+        width: 200px;
+        font-family: Arial, sans-serif;
+        padding: 10px;
+      }
+      button {
+        width: 100%;
+        padding: 8px;
+        margin-top: 10px;
+        background-color: #ffda79;
+        border: 1px solid #ffa502;
+        cursor: pointer;
+      }
+      button:hover {
+        background-color: #ffa502;
+      }
+      .color-picker {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 10px;
+      }
+      .color-option {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+      .yellow {
+        background-color: #ffda79;
+      }
+      .blue {
+        background-color: #81ecec;
+      }
+      .green {
+        background-color: #7bed9f;
+      }
+      .pink {
+        background-color: #ff9ff3;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>Sticky Notes</h3>
+    <div>
+      <p>Choose note color:</p>
+      <div class="color-picker">
+        <div class="color-option yellow" data-color="#ffda79"></div>
+        <div class="color-option blue" data-color="#81ecec"></div>
+        <div class="color-option green" data-color="#7bed9f"></div>
+        <div class="color-option pink" data-color="#ff9ff3"></div>
+      </div>
+    </div>
+    <button id="addNote">Add New Note</button>
+    <button id="clearNotes">Clear All Notes</button>
+    <script src="popup.js"></script>
+  </body>
+</html>
