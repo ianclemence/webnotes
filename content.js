@@ -1,18 +1,24 @@
 let notes = [];
 const NOTES_KEY = "stickyNotes";
 
-// Load notes when page loads
-window.addEventListener("load", function () {
-  loadNotes();
-});
-
-// Listen for messages from popup
+// Set up connection as soon as content script loads
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "addNote") {
     createNote(request.color);
+    // Send acknowledgment
+    sendResponse({ status: "success" });
   } else if (request.action === "clearNotes") {
     clearAllNotes();
+    // Send acknowledgment
+    sendResponse({ status: "success" });
   }
+  // Return true to indicate we'll send a response asynchronously
+  return true;
+});
+
+// Load notes when page loads
+window.addEventListener("load", function () {
+  loadNotes();
 });
 
 // Load notes from storage
@@ -37,17 +43,22 @@ function saveNotes() {
     const allNotes = result[NOTES_KEY] || {};
 
     // Update notes for current URL
-    allNotes[url] = notes.map((note) => {
-      const noteElement = document.getElementById(note.id);
-      return {
-        id: note.id,
-        content: noteElement.querySelector(".note-content").innerText,
-        left: noteElement.style.left,
-        top: noteElement.style.top,
-        color: noteElement.style.backgroundColor,
-        zIndex: noteElement.style.zIndex,
-      };
-    });
+    allNotes[url] = notes
+      .map((note) => {
+        const noteElement = document.getElementById(note.id);
+        if (noteElement) {
+          return {
+            id: note.id,
+            content: noteElement.querySelector(".note-content").innerText,
+            left: noteElement.style.left,
+            top: noteElement.style.top,
+            color: noteElement.style.backgroundColor,
+            zIndex: noteElement.style.zIndex,
+          };
+        }
+        return null;
+      })
+      .filter(Boolean); // Remove any null entries
 
     // Save back to storage
     chrome.storage.local.set({ [NOTES_KEY]: allNotes });
