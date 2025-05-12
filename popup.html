@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Web Notes</title>
+    <link rel="stylesheet" href="styles/popup.css" />
+  </head>
+  <body>
+    <div class="popup-container">
+      <header>
+        <h1>Web Notes</h1>
+        <div class="header-actions">
+          <button id="searchToggle">🔍</button>
+          <button id="exportNotes">📤</button>
+          <button id="importNotes">📥</button>
+        </div>
+      </header>
+
+      <section id="searchSection" class="hidden">
+        <input type="text" id="searchInput" placeholder="Search notes..." />
+        <div id="searchResults"></div>
+      </section>
+
+      <section id="noteActions">
+        <div class="note-type-selector">
+          <button id="freeFloatingBtn">Free Note</button>
+          <button id="highlightBoundBtn">Highlight Note</button>
+        </div>
+      </section>
+
+      <section id="stats">
+        <p>Total Notes: <span id="totalNotesCount">0</span></p>
+        <p>Active Page Notes: <span id="activePageNotesCount">0</span></p>
+      </section>
+    </div>
+
+    <input type="file" id="importFileInput" accept=".json" class="hidden" />
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
