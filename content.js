@@ -1,9 +1,11 @@
 import StorageManager from "./utils/storage-manager.js";
 import InputSanitizer from "./utils/input-sanitizer.js";
+import RichTextEditor from "./components/rich-text-editor.js";
 
 class WebNotesManager {
   constructor() {
     this.notes = {};
+    this.mutationTimeout = null;
     this.initializeEventListeners();
   }
 
@@ -11,17 +13,37 @@ class WebNotesManager {
    * Initialize event listeners and note tracking
    */
   initializeEventListeners() {
-    // Listen for keyboard shortcut to create note
+    // Listen for keyboard shortcut
     document.addEventListener(
       "keydown",
       this.handleKeyboardShortcut.bind(this)
     );
+
+    // Listen for messages from popup or background script
+    chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
 
     // Load existing notes when page loads
     this.loadExistingNotes();
 
     // Set up mutation observer for dynamic content
     this.setupMutationObserver();
+  }
+
+  /**
+   * Handle incoming messages
+   * @param {Object} message - Message object
+   * @param {Object} sender - Sender details
+   * @param {Function} sendResponse - Response callback
+   */
+  handleMessage(message, sender, sendResponse) {
+    switch (message.action) {
+      case "createFreeFloatingNote":
+        this.createNoteAtPosition(message.position);
+        return true;
+      case "createHighlightBoundNote":
+        this.createHighlightBoundNote();
+        return true;
+    }
   }
 
   /**
@@ -45,14 +67,27 @@ class WebNotesManager {
    * @param {Event} event - Event triggering note creation
    */
   createNoteAtCursor(event) {
+    this.createNoteAtPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }
+
+  /**
+   * Create a note at a specific position
+   * @param {Object} position - Note position
+   */
+  createNoteAtPosition(position) {
     const note = {
+      id: Date.now().toString(),
       content: "",
       position: {
-        x: event.clientX,
-        y: event.clientY,
+        x: position.x || 50,
+        y: position.y || 50,
       },
       type: "free-floating",
       pageUrl: window.location.href,
+      createdAt: Date.now(),
     };
 
     const sanitizedNote = InputSanitizer.validateNoteData(note);
@@ -61,14 +96,43 @@ class WebNotesManager {
   }
 
   /**
-   * Load existing notes for the current page
+   * Create a highlight-bound note
    */
-  async loadExistingNotes() {
-    const pageNotes = await StorageManager.getNotes(window.location.href);
+  createHighlightBoundNote() {
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return;
 
-    Object.values(pageNotes).forEach((note) => {
-      this.renderNote(note);
-    });
+    const range = selection.getRangeAt(0);
+    const selectedText = range.toString().trim();
+
+    if (!selectedText) {
+      alert("Select some text to create a highlight-bound note");
+      return;
+    }
+
+    const rect = range.getBoundingClientRect();
+    const note = {
+      id: Date.now().toString(),
+      content: "",
+      position: {
+        x: rect.left,
+        y: rect.bottom + 10,
+      },
+      type: "highlight-bound",
+      anchorRange: {
+        startContainer: range.startContainer,
+        startOffset: range.startOffset,
+        endContainer: range.endContainer,
+        endOffset: range.endOffset,
+      },
+      selectedText: selectedText,
+      pageUrl: window.location.href,
+      createdAt: Date.now(),
+    };
+
+    const sanitizedNote = InputSanitizer.validateNoteData(note);
+    this.renderNote(sanitizedNote);
+    StorageManager.saveNote(sanitizedNote);
   }
 
   /**
@@ -80,83 +144,51 @@ class WebNotesManager {
     const noteElement = document.createElement("div");
     noteElement.classList.add("web-note", `note-type-${note.type}`);
     noteElement.id = note.id;
-    noteElement.innerHTML = note.content;
 
     // Set positioning
     noteElement.style.position = "absolute";
     noteElement.style.left = `${note.position.x}px`;
     noteElement.style.top = `${note.position.y}px`;
 
-    // Add drag functionality for free-floating notes
-    if (note.type === "free-floating") {
-      this.makeDraggable(noteElement);
-    }
-
-    // Add note controls (edit, delete)
+    // Add note controls
     this.addNoteControls(noteElement, note);
 
-    // Append to body
+    // Initialize rich text editor
+    const editor = new RichTextEditor(noteElement, (content) =>
+      this.updateNoteContent(note, content)
+    );
+
+    // Set initial content
+    if (note.content) {
+      editor.setContent(note.content);
+    }
+
+    // Add drag functionality for free-floating notes
+    if (note.type === "free-floating") {
+      this.makeDraggable(noteElement, note);
+    }
+
     document.body.appendChild(noteElement);
 
     // Store reference
-    this.notes[note.id] = noteElement;
+    this.notes[note.id] = {
+      element: noteElement,
+      note: note,
+      editor: editor,
+    };
   }
 
   /**
-   * Make a note draggable
-   * @param {HTMLElement} noteElement - Note element to make draggable
+   * Update note content in storage
+   * @param {Object} note - Note to update
+   * @param {string} content - New note content
    */
-  makeDraggable(noteElement) {
-    let isDragging = false;
-    let currentX, currentY, initialX, initialY;
-
-    const dragStart = (e) => {
-      initialX = e.clientX - noteElement.offsetLeft;
-      initialY = e.clientY - noteElement.offsetTop;
-
-      isDragging = true;
-      document.addEventListener("mousemove", drag);
-      document.addEventListener("mouseup", dragEnd);
-    };
-
-    const drag = (e) => {
-      if (!isDragging) return;
-
-      currentX = e.clientX - initialX;
-      currentY = e.clientY - initialY;
-
-      noteElement.style.left = `${currentX}px`;
-      noteElement.style.top = `${currentY}px`;
-    };
-
-    const dragEnd = () => {
-      isDragging = false;
-      document.removeEventListener("mousemove", drag);
-      document.removeEventListener("mouseup", dragEnd);
-
-      // Update note position in storage
-      this.updateNotePosition(noteElement);
-    };
-
-    noteElement.addEventListener("mousedown", dragStart);
-  }
-
-  /**
-   * Update note position in storage
-   * @param {HTMLElement} noteElement - Note element to update
-   */
-  updateNotePosition(noteElement) {
-    const note = this.notes[noteElement.id];
-    if (!note) return;
-
+  updateNoteContent(note, content) {
     const updatedNote = {
       ...note,
-      position: {
-        x: parseInt(noteElement.style.left, 10),
-        y: parseInt(noteElement.style.top, 10),
-      },
+      content: content,
+      updatedAt: Date.now(),
     };
-
     StorageManager.saveNote(updatedNote);
   }
 
@@ -169,56 +201,65 @@ class WebNotesManager {
     const controlsContainer = document.createElement("div");
     controlsContainer.classList.add("note-controls");
 
-    // Edit button
-    const editButton = document.createElement("button");
-    editButton.textContent = "✏️";
-    editButton.addEventListener("click", () =>
-      this.editNote(noteElement, note)
-    );
-
     // Delete button
     const deleteButton = document.createElement("button");
     deleteButton.textContent = "🗑️";
     deleteButton.addEventListener("click", () => this.deleteNote(note));
 
-    controlsContainer.appendChild(editButton);
     controlsContainer.appendChild(deleteButton);
     noteElement.appendChild(controlsContainer);
   }
 
   /**
-   * Edit an existing note
-   * @param {HTMLElement} noteElement - Note element to edit
+   * Make a note draggable
+   * @param {HTMLElement} noteElement - Note element to make draggable
    * @param {Object} note - Note data
    */
-  editNote(noteElement, note) {
-    // Create a textarea for editing
-    const editor = document.createElement("textarea");
-    editor.value = noteElement.innerHTML;
-    editor.classList.add("note-editor");
+  makeDraggable(noteElement, note) {
+    let isDragging = false;
+    let initialX, initialY;
 
-    // Replace note content with editor
-    const originalContent = noteElement.innerHTML;
-    noteElement.innerHTML = "";
-    noteElement.appendChild(editor);
-    editor.focus();
+    const dragStart = (e) => {
+      initialX = e.clientX - noteElement.offsetLeft;
+      initialY = e.clientY - noteElement.offsetTop;
+      isDragging = true;
+    };
 
-    // Save changes on blur
-    editor.addEventListener("blur", () => {
-      const newContent = InputSanitizer.sanitizeHTML(editor.value);
-      noteElement.innerHTML = newContent;
+    const drag = (e) => {
+      if (!isDragging) return;
+      noteElement.style.left = `${e.clientX - initialX}px`;
+      noteElement.style.top = `${e.clientY - initialY}px`;
+    };
 
-      // Update note in storage
-      const updatedNote = {
-        ...note,
-        content: newContent,
-        updatedAt: Date.now(),
-      };
-      StorageManager.saveNote(updatedNote);
+    const dragEnd = () => {
+      isDragging = false;
+      this.updateNotePosition(note);
+      document.removeEventListener("mousemove", drag);
+    };
 
-      // Re-add controls
-      this.addNoteControls(noteElement, updatedNote);
+    noteElement.addEventListener("mousedown", (e) => {
+      dragStart(e);
+      document.addEventListener("mousemove", drag);
+      document.addEventListener("mouseup", dragEnd, { once: true });
     });
+  }
+
+  /**
+   * Update note position in storage
+   * @param {Object} note - Note to update
+   */
+  updateNotePosition(note) {
+    const noteRef = this.notes[note.id];
+    if (!noteRef) return;
+
+    const updatedNote = {
+      ...note,
+      position: {
+        x: parseInt(noteRef.element.style.left, 10),
+        y: parseInt(noteRef.element.style.top, 10),
+      },
+    };
+    StorageManager.saveNote(updatedNote);
   }
 
   /**
@@ -226,29 +267,29 @@ class WebNotesManager {
    * @param {Object} note - Note to delete
    */
   async deleteNote(note) {
-    // Remove from DOM
-    const noteElement = document.getElementById(note.id);
-    if (noteElement) {
-      noteElement.remove();
+    const noteRef = this.notes[note.id];
+    if (noteRef) {
+      noteRef.element.remove();
+      delete this.notes[note.id];
     }
-
-    // Remove from storage
     await StorageManager.deleteNote(note.pageUrl, note.id);
+  }
 
-    // Remove from local notes tracking
-    delete this.notes[note.id];
+  /**
+   * Load existing notes for the current page
+   */
+  async loadExistingNotes() {
+    const pageNotes = await StorageManager.getNotes(window.location.href);
+    Object.values(pageNotes).forEach((note) => this.renderNote(note));
   }
 
   /**
    * Set up MutationObserver to handle dynamic content
    */
   setupMutationObserver() {
-    const observer = new MutationObserver((mutations) => {
-      // Throttle reattachment to prevent performance issues
+    const observer = new MutationObserver(() => {
       clearTimeout(this.mutationTimeout);
-      this.mutationTimeout = setTimeout(() => {
-        this.reattachNotes();
-      }, 300);
+      this.mutationTimeout = setTimeout(() => this.reattachNotes(), 300);
     });
 
     observer.observe(document.body, {
@@ -261,17 +302,12 @@ class WebNotesManager {
    * Reattach notes after DOM changes
    */
   reattachNotes() {
-    // Remove existing notes
-    Object.values(this.notes).forEach((note) => note.remove());
+    Object.values(this.notes).forEach((noteRef) => noteRef.element.remove());
     this.notes = {};
-
-    // Reload notes
     this.loadExistingNotes();
   }
 }
 
 // Initialize Web Notes when script loads
 const webNotesManager = new WebNotesManager();
-
-// Export for potential external use
 export default webNotesManager;
